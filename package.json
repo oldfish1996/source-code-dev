@@ -1,6 +1,6 @@
 {
   "name": "source-code-dev",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "main": "index.js",
   "description": "一些开源项目的umd格式打包源码，带有sourcemap",
   "repository": "https://github.com/oldfish1996/source-code-dist",
