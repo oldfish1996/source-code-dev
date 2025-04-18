@@ -1,4 +1,4 @@
-name: Auto Release to NPM (Yarn)
+name: Auto version & publish
 
 on:
   push:
@@ -13,23 +13,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          registry-url: 'https://registry.npmjs.org/'
+          node-version: 18
+          registry-url: 'https://registry.npmjs.org'
 
-      - name: Bump version and push tag
+      - name: Set Git identity
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          yarn version --patch
-          git add package.json yarn.lock
-          git push origin HEAD:master --follow-tags
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Publish to NPM
-        run: yarn publish --access public
+      - name: Bump version, commit & tag
+        run: |
+          git pull origin master
+          npm version patch -m "chore(release): %s"
+          git push origin master --follow-tags
+
+      - name: Publish to npm
+        run: yarn publish --non-interactive
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
