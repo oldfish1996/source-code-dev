@@ -1,56 +1,53 @@
-name: Release & Publish
+name: Publish NPM Package
 
 on:
   push:
     branches:
       - master
 
-concurrency:
-  group: release
-  cancel-in-progress: false
-
 jobs:
-  release:
+  publish:
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: write
-
-    if: "!contains(github.event.head_commit.message, 'chore(release)')"
-
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 18
-          registry-url: https://registry.npmjs.org
+          node-version: 20
+          registry-url: https://registry.npmjs.org/
 
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        run: npm install
 
-      - name: Set Git identity
+      # 防止循环触发
+      - name: Skip if version commit
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          if git log -1 --pretty=%B | grep -q "chore(release)"; then
+            echo "Skip release commit"
+            exit 0
+          fi
 
-      - name: Bump version
-        run: npm version patch -m "chore(release): %s"
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
 
-      - name: Push commit and tag
-        run: git push origin master --follow-tags
+      - name: Bump patch version
+        run: |
+          npm version patch -m "chore(release): %s"
 
-      - name: Publish to npm
+      - name: Push version commit
+        run: |
+          git push
+          git push --tags
+
+      - name: Publish to NPM
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.bump.outputs.version }}
-          
