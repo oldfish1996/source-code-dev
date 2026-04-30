@@ -1,53 +1,74 @@
 name: Publish NPM Package
 
 on:
-  push:
-    branches:
-      - master
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Version bump type
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 jobs:
   publish:
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org/
+          always-auth: true
 
       - name: Install dependencies
         run: npm install
-
-      # 防止循环触发
-      - name: Skip if version commit
-        run: |
-          if git log -1 --pretty=%B | grep -q "chore(release)"; then
-            echo "Skip release commit"
-            exit 0
-          fi
 
       - name: Configure Git
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-      - name: Bump patch version
+      - name: Verify NPM auth
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          npm version patch -m "chore(release): %s"
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN secret is not configured"
+            exit 1
+          fi
 
-      - name: Push version commit
-        run: |
-          git push
-          git push --tags
+          echo "Authenticated npm user:"
+          npm whoami
+
+          echo "Current package on npm:"
+          npm view source-code-dev name version maintainers --json
+
+      - name: Bump version locally
+        run: npm version "${{ inputs.release_type }}" --no-git-tag-version
 
       - name: Publish to NPM
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Commit and push release version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          git add package.json
+          git commit -m "chore(release): v$VERSION"
+          git tag "v$VERSION"
+          git push
+          git push --tags
