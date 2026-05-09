@@ -1,74 +1,64 @@
-name: Publish NPM Package
+name: Publish to npm
 
 on:
-  workflow_dispatch:
-    inputs:
-      release_type:
-        description: Version bump type
-        required: true
-        default: patch
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
 
 jobs:
   publish:
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      # setup-node 会根据 registry-url 自动在 .npmrc 写入鉴权配置，
+      # 后续 npm publish 会读取 NODE_AUTH_TOKEN 完成认证。
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
-          registry-url: https://registry.npmjs.org/
-          always-auth: true
+          registry-url: https://registry.npmjs.org
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Configure Git
+      - name: Validate tag matches package version
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-
-      - name: Verify NPM auth
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "NPM_TOKEN secret is not configured"
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          echo "tag=$TAG"
+          echo "package.json=$PKG_VERSION"
+          if [ "$TAG" != "$PKG_VERSION" ]; then
+            echo "::error::Tag $TAG does not match package.json $PKG_VERSION"
             exit 1
           fi
 
-          echo "Authenticated npm user:"
-          npm whoami
-
-          echo "Current package on npm:"
-          npm view source-code-dev name version maintainers --json
-
-      - name: Bump version locally
-        run: npm version "${{ inputs.release_type }}" --no-git-tag-version
-
-      - name: Publish to NPM
-        run: npm publish --access public
+      - name: Publish to npm
+        # 注意：账户开启 2FA 时，NPM_TOKEN 必须使用 "Automation" 类型的 token，
+        # 否则会因为要求输入 OTP 而发布失败。
+        # 这里不显式传 --registry，避免覆盖 setup-node 写入 .npmrc 的鉴权配置（按 registry URL 做 key 匹配）。
+        # --provenance 与 permissions.id-token: write 配合，启用 npm 来源证明。
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if echo "$PKG_VERSION" | grep -q '-'; then
+            NPM_TAG=next
+          else
+            NPM_TAG=latest
+          fi
+          npm publish --access public --tag "$NPM_TAG" --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Commit and push release version
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          git add package.json
-          git commit -m "chore(release): v$VERSION"
-          git tag "v$VERSION"
-          git push
-          git push --tags
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
